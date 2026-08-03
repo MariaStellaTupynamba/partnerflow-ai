@@ -141,3 +141,38 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg
+
+# Alembic (keep migration scripts, ignore local sqlite artifacts if any)
+*.sqlite3
+
+# Playwright
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/blob-report/
+apps/web/playwright/.cache/
+
+# Docker
+docker-compose.override.yml
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea/

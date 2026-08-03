@@ -1,0 +1,22 @@
+{
+  "name": "partnerflow-ai",
+  "private": true,
+  "description": "AI-powered vendor sourcing, proposal comparison, and partner management platform",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "apps/web",
+    "packages/shared-types"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace apps/web",
+    "build:web": "npm run build --workspace apps/web",
+    "lint:web": "npm run lint --workspace apps/web",
+    "typecheck:web": "npm run typecheck --workspace apps/web",
+    "test:web": "npm run test --workspace apps/web",
+    "test:e2e": "npm run test:e2e --workspace apps/web",
+    "build:shared-types": "npm run build --workspace packages/shared-types"
+  }
+}

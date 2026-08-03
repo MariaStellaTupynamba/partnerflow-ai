@@ -1,0 +1,67 @@
+name: CI - API
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/api/**"
+      - ".github/workflows/ci-api.yml"
+  pull_request:
+    paths:
+      - "apps/api/**"
+      - ".github/workflows/ci-api.yml"
+
+jobs:
+  lint-typecheck-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: partnerflow
+          POSTGRES_PASSWORD: partnerflow-ci-password
+          POSTGRES_DB: partnerflow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U partnerflow"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      ENVIRONMENT: test
+      DATABASE_URL: postgresql+psycopg://partnerflow:partnerflow-ci-password@localhost:5432/partnerflow
+      # Fake, CI-only secret — never used outside this workflow.
+      JWT_SECRET_KEY: ci-only-secret-not-used-anywhere-else
+      CORS_ALLOW_ORIGINS: '["http://localhost:3000"]'
+      AI_PROVIDER_API_KEY: ""
+
+    defaults:
+      run:
+        working-directory: apps/api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: apps/api/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Type-check
+        run: mypy app
+
+      - name: Apply migrations
+        run: alembic upgrade head
+
+      - name: Tests
+        run: pytest --cov --cov-report=term-missing

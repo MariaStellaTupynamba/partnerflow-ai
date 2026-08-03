@@ -1,0 +1,58 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-partnerflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-partnerflow}
+      POSTGRES_DB: ${POSTGRES_DB:-partnerflow}
+    ports:
+      - "5432:5432"
+    volumes:
+      - partnerflow_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-partnerflow}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Overrides the host-oriented value from .env so the API reaches Postgres by its
+      # service name on the Compose network instead of localhost.
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-partnerflow}:${POSTGRES_PASSWORD:-partnerflow}@db:5432/${POSTGRES_DB:-partnerflow}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./apps/api/app:/app/app
+      - ./apps/api/alembic:/app/alembic
+      - ./apps/api/tests:/app/tests
+      - ./apps/api/alembic.ini:/app/alembic.ini
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./apps/web/src:/workspace/apps/web/src
+      - ./apps/web/public:/workspace/apps/web/public
+      - ./packages/shared-types/src:/workspace/packages/shared-types/src
+    depends_on:
+      - api
+
+volumes:
+  partnerflow_pgdata:
