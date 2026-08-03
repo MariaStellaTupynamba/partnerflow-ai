@@ -76,9 +76,10 @@ cycle through `httpx.MockTransport`, confirming the integration code path itself
 ## Local development
 
 `docker-compose.yml` runs three services: `db` (Postgres 16), `api` (FastAPI with `--reload`), and
-`web` (`next dev`). Both Dockerfiles are intentionally dev-oriented (bind-mounted source, no
-multi-stage production build) — this milestone explicitly does not deploy anything, so optimizing
-for a production image is out of scope for now.
+`web` (`next dev`). `apps/api/Dockerfile` and `apps/web`'s dev workflow are dev-oriented
+(bind-mounted source, hot reload). Production deployment uses a separate path for each app —
+`apps/api/Dockerfile.prod` for the backend, the OpenNext Cloudflare adapter for the frontend — see
+[deployment.md](deployment.md).
 
 ## Deliberate scope boundaries for this milestone
 

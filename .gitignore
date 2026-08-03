@@ -172,6 +172,12 @@ apps/web/playwright/.cache/
 # Docker
 docker-compose.override.yml
 
+# Cloudflare / OpenNext (apps/web)
+apps/web/.open-next/
+apps/web/.wrangler/
+apps/web/.dev.vars
+apps/web/cloudflare-env.d.ts
+
 # IDE
 .vscode/*
 !.vscode/extensions.json

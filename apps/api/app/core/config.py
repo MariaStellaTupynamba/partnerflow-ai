@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,6 +14,17 @@ class Settings(BaseSettings):
     database_url: str = Field(
         default="postgresql+psycopg://partnerflow:partnerflow@localhost:5432/partnerflow",
     )
+
+    @field_validator("database_url")
+    @classmethod
+    def _use_psycopg_driver(cls, value: str) -> str:
+        """Managed Postgres providers (e.g. Railway) hand out bare `postgres://` /
+        `postgresql://` URLs. SQLAlchemy needs the driver specified explicitly, so
+        normalize to the psycopg (v3) dialect used everywhere else in this app."""
+        for prefix in ("postgres://", "postgresql://"):
+            if value.startswith(prefix):
+                return "postgresql+psycopg://" + value[len(prefix) :]
+        return value
 
     jwt_secret_key: str
     jwt_algorithm: str = "HS256"

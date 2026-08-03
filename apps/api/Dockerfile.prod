@@ -1,0 +1,28 @@
+# Production image for the FastAPI backend (e.g. Railway).
+# Unlike the dev Dockerfile, this installs only runtime dependencies, runs
+# migrations before starting, and does not reload on file changes.
+FROM python:3.12-slim
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini ./
+COPY docker-entrypoint.sh ./
+RUN chmod +x docker-entrypoint.sh
+
+RUN useradd --create-home appuser && chown -R appuser:appuser /app
+USER appuser
+
+# Railway (and most PaaS providers) inject PORT at runtime; docker-entrypoint.sh
+# falls back to 8000 when it isn't set (e.g. running this image standalone).
+EXPOSE 8000
+
+ENTRYPOINT ["./docker-entrypoint.sh"]
