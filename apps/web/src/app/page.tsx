@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { ApiHealthStatus } from "@/components/ApiHealthStatus";
 
 export default function Home() {
@@ -8,7 +10,21 @@ export default function Home() {
           <span className="text-sm font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
             PartnerFlow AI
           </span>
-          <ApiHealthStatus />
+          <div className="flex items-center gap-4">
+            <ApiHealthStatus />
+            <Link
+              href="/login"
+              className="text-sm font-medium text-zinc-700 hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-zinc-50"
+            >
+              Log in
+            </Link>
+            <Link
+              href="/register"
+              className="rounded-md bg-zinc-950 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"
+            >
+              Sign up
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -22,9 +38,17 @@ export default function Home() {
         <p className="mt-6 max-w-xl text-lg leading-8 text-zinc-600 dark:text-zinc-400">
           PartnerFlow AI helps teams source vendors, compare proposals side by side, and manage
           partner relationships in one place. This foundation milestone establishes the platform
-          architecture — sourcing, comparison, and reporting features are built on top of it in
-          later milestones.
+          architecture and authenticated shell — sourcing, comparison, and reporting features are
+          built on top of it in later milestones.
         </p>
+        <div className="mt-8">
+          <Link
+            href="/register"
+            className="inline-flex items-center rounded-md bg-zinc-950 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"
+          >
+            Get started
+          </Link>
+        </div>
       </main>
 
       <footer className="border-t border-zinc-200 px-6 py-6 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">

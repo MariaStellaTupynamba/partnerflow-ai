@@ -23,12 +23,6 @@ export interface UserPublic {
   createdAt: string;
 }
 
-export interface TokenPair {
-  accessToken: string;
-  refreshToken: string;
-  tokenType: "bearer";
-}
-
 export interface RegisterRequest {
   email: string;
   password: string;
@@ -37,10 +31,6 @@ export interface RegisterRequest {
 export interface LoginRequest {
   email: string;
   password: string;
-}
-
-export interface RefreshRequest {
-  refreshToken: string;
 }
 
 export interface ApiErrorResponse {

@@ -37,6 +37,19 @@ class Settings(BaseSettings):
     ai_provider_api_key: str = Field(default="")
     ai_provider_model: str = Field(default="gpt-4o-mini")
 
+    @property
+    def cookie_secure(self) -> bool:
+        """Browsers refuse `Secure` cookies over plain HTTP, which local dev uses."""
+        return self.environment == "production"
+
+    @property
+    def cookie_samesite(self) -> Literal["lax", "none"]:
+        """Frontend and backend are on different registrable domains in production
+        (Cloudflare Workers / Render), so cookies need SameSite=None there to be sent
+        cross-site at all. Locally both run on `localhost` (different ports only, which
+        counts as the same site), so Lax is enough and avoids needing Secure."""
+        return "none" if self.environment == "production" else "lax"
+
 
 @lru_cache
 def get_settings() -> Settings:

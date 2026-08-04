@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db_session
+from app.core.cookies import REFRESH_TOKEN_COOKIE, clear_auth_cookies, set_auth_cookies
 from app.core.security import (
     InvalidTokenError,
     TokenType,
@@ -13,14 +14,16 @@ from app.core.security import (
     verify_password,
 )
 from app.models.user import User
-from app.schemas.auth import LoginRequest, RefreshRequest, TokenPair
+from app.schemas.auth import LoginRequest
 from app.schemas.user import UserCreate, UserRead
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-async def register(payload: UserCreate, db: AsyncSession = Depends(get_db_session)) -> User:
+async def register(
+    payload: UserCreate, response: Response, db: AsyncSession = Depends(get_db_session)
+) -> User:
     existing = await db.scalar(select(User).where(User.email == payload.email))
     if existing is not None:
         raise HTTPException(
@@ -32,11 +35,15 @@ async def register(payload: UserCreate, db: AsyncSession = Depends(get_db_sessio
     db.add(user)
     await db.commit()
     await db.refresh(user)
+
+    set_auth_cookies(response, create_access_token(user.id), create_refresh_token(user.id))
     return user
 
 
-@router.post("/login", response_model=TokenPair)
-async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db_session)) -> TokenPair:
+@router.post("/login", response_model=UserRead)
+async def login(
+    payload: LoginRequest, response: Response, db: AsyncSession = Depends(get_db_session)
+) -> User:
     invalid_credentials = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Incorrect email or password.",
@@ -48,23 +55,26 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db_session
     if not user.is_active:
         raise invalid_credentials
 
-    return TokenPair(
-        access_token=create_access_token(user.id),
-        refresh_token=create_refresh_token(user.id),
-    )
+    set_auth_cookies(response, create_access_token(user.id), create_refresh_token(user.id))
+    return user
 
 
-@router.post("/refresh", response_model=TokenPair)
+@router.post("/refresh", status_code=status.HTTP_204_NO_CONTENT)
 async def refresh(
-    payload: RefreshRequest, db: AsyncSession = Depends(get_db_session)
-) -> TokenPair:
+    response: Response,
+    db: AsyncSession = Depends(get_db_session),
+    refresh_token: str | None = Cookie(default=None, alias=REFRESH_TOKEN_COOKIE),
+) -> None:
     unauthorized = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired refresh token.",
     )
 
+    if refresh_token is None:
+        raise unauthorized
+
     try:
-        user_id = decode_token(payload.refresh_token, TokenType.REFRESH)
+        user_id = decode_token(refresh_token, TokenType.REFRESH)
     except InvalidTokenError as exc:
         raise unauthorized from exc
 
@@ -72,10 +82,12 @@ async def refresh(
     if user is None or not user.is_active:
         raise unauthorized
 
-    return TokenPair(
-        access_token=create_access_token(user.id),
-        refresh_token=create_refresh_token(user.id),
-    )
+    set_auth_cookies(response, create_access_token(user.id), create_refresh_token(user.id))
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(response: Response) -> None:
+    clear_auth_cookies(response)
 
 
 @router.get("/me", response_model=UserRead)
