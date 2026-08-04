@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.cookies import ACCESS_TOKEN_COOKIE
 from app.core.security import InvalidTokenError, TokenType, decode_token
 from app.db.session import get_db
+from app.models.proposal import Proposal
 from app.models.user import User
+from app.models.vendor import Vendor
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
@@ -38,3 +40,31 @@ async def get_current_user(
         raise unauthorized
 
     return user
+
+
+async def get_owned_vendor(
+    vendor_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> Vendor:
+    vendor = await db.scalar(
+        select(Vendor).where(Vendor.id == vendor_id, Vendor.owner_id == current_user.id)
+    )
+    if vendor is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor not found.")
+    return vendor
+
+
+async def get_owned_proposal(
+    proposal_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> Proposal:
+    proposal = await db.scalar(
+        select(Proposal)
+        .join(Vendor)
+        .where(Proposal.id == proposal_id, Vendor.owner_id == current_user.id)
+    )
+    if proposal is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found.")
+    return proposal

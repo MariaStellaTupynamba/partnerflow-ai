@@ -44,7 +44,11 @@ services:
       dockerfile: apps/web/Dockerfile
     restart: unless-stopped
     environment:
+      # Reachable from the browser (runs on the host, outside Compose's network).
       NEXT_PUBLIC_API_URL: http://localhost:8000
+      # Reachable from the Next.js server itself (runs inside this container, where
+      # `localhost` means this container, not the `api` service).
+      INTERNAL_API_URL: http://api:8000
     ports:
       - "3000:3000"
     volumes:

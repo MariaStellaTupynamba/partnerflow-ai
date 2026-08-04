@@ -10,7 +10,8 @@ repository are fictional.
 - **Frontend:** Next.js (App Router), React, TypeScript, Tailwind CSS
 - **Backend:** FastAPI, Python, SQLAlchemy 2, Alembic, Pydantic v2
 - **Database:** PostgreSQL
-- **AI integration:** provider-agnostic abstraction over OpenAI-compatible APIs
+- **AI integration:** provider-agnostic abstraction over OpenAI-compatible APIs, used for
+  AI-assisted proposal comparison
 - **Auth:** JWT access + refresh tokens
 - **Testing:** Pytest, Vitest, Playwright
 - **Infra:** Docker Compose (local), GitHub Actions (CI)
@@ -72,9 +73,9 @@ npm run lint --workspace apps/web
 npm run typecheck --workspace apps/web
 npm run test --workspace apps/web
 
-# apps/web/e2e/auth.spec.ts exercises the real auth flow end-to-end, so the backend and
-# Postgres need to actually be running first (e.g. `docker compose up -d db` + uvicorn, or
-# the full `docker compose up`) before this will pass.
+# apps/web/e2e/*.spec.ts exercise real flows end-to-end (auth, vendors/proposals/comparison),
+# so the backend and Postgres need to actually be running first (e.g. `docker compose up -d db`
+# + uvicorn, or the full `docker compose up`) before this will pass.
 npm run test:e2e --workspace apps/web
 
 # Backend (from apps/api, with .venv active and Postgres running)

@@ -1,9 +1,10 @@
 # Architecture
 
 PartnerFlow AI is an npm-workspaces monorepo with a Next.js frontend and a FastAPI backend,
-sharing a Postgres database. This document describes the platform foundation (milestone 1) and
-the authenticated frontend shell built on top of it (milestone 2): what exists, what deliberately
-doesn't yet, and why key decisions were made the way they were.
+sharing a Postgres database. This document covers the platform foundation (milestone 1), the
+authenticated frontend shell (milestone 2), and the first real product features — vendors,
+proposals, and AI-assisted comparison (milestone 3): what exists, what deliberately doesn't yet,
+and why key decisions were made the way they were.
 
 ## Repository layout
 
@@ -30,11 +31,21 @@ docker-compose.yml    Local dev environment: Postgres + API + web
   actually wired together, not just visually scaffolded.
 - **Auth UI:** `/register` and `/login` pages (client components, plain `useState` forms — no
   form library, not needed at this size) call `apiClient.register` / `.login`, then redirect to
-  `/dashboard`. `/dashboard` is a Server Component that calls `src/lib/server-auth.ts`'s
-  `getCurrentUser()` — this exists *separately* from the browser-only `apiClient` because a
-  server-side fetch has no cookie jar of its own; it has to read the incoming request's cookies via
-  `next/headers` and forward them explicitly. Unauthenticated visits redirect to `/login` before
+  `/dashboard`. Unauthenticated visits to any `/dashboard/**` route redirect to `/login` before
   any protected content renders (no flash of content).
+- **`src/lib/server-api.ts`** is the Server Component counterpart to `apiClient` — used by every
+  page under `/dashboard` for the initial server-rendered data (current user, vendors, proposals).
+  It exists *separately* from the browser-only `apiClient` because a server-side fetch has no
+  cookie jar of its own; it reads the incoming request's cookies via `next/headers` and forwards
+  them explicitly. It talks to `env.internalApiUrl`, not `env.apiUrl` — see the Docker Compose
+  gotcha below for why those two are sometimes different URLs.
+- **Vendor/proposal UI:** a vendor list (`/dashboard`), vendor detail with its proposals
+  (`/dashboard/vendors/[vendorId]`), create/edit forms for both (`VendorForm`/`ProposalForm`,
+  shared between their `new` and `edit` pages since the fields are identical either way), and a
+  cross-vendor comparison page (`/dashboard/compare`). Delete actions (`DeleteVendorButton`,
+  `DeleteProposalButton`) are small client components — a Server Component can't pass an
+  `onClick` callback down to one (functions aren't serializable across that boundary), so each
+  takes a plain string ID prop and makes its own `apiClient` call.
 
 ## Backend (`apps/api`)
 
@@ -74,8 +85,8 @@ JavaScript, so a token can't be exfiltrated by an XSS payload the way a token si
 - `access_token` is scoped `Path=/` (every endpoint may need it); `refresh_token` is scoped
   `Path=/api/v1/auth` (only the refresh/logout endpoints ever need to see it).
 - The frontend's `apiClient` always sends `credentials: "include"`; a **server-side** fetch (used
-  by `/dashboard`'s auth check) has no browser cookie jar and must forward the incoming request's
-  `Cookie` header explicitly — see `src/lib/server-auth.ts`.
+  by every `/dashboard` page's auth check) has no browser cookie jar and must forward the incoming
+  request's `Cookie` header explicitly — see `src/lib/server-api.ts`.
 
 Other library/design choices:
 
@@ -94,23 +105,51 @@ Other library/design choices:
   (a Server Action or Middleware — a plain Server Component render cannot set cookies in Next.js),
   which is meaningful added complexity deferred until it's actually needed.
 - **No CSRF token.** `SameSite=None` cookies (used in production, cross-site) don't provide CSRF
-  protection the way `Lax`/`Strict` do. This is currently low-risk because the only endpoints that
-  accept cookies are the auth endpoints themselves (forging a login/register request requires
-  already knowing the victim's password) — this will need revisiting once real state-changing,
-  authenticated endpoints (e.g. creating a proposal) exist.
+  protection the way `Lax`/`Strict` do. This was low-risk when only auth endpoints existed
+  (forging a login/register request requires already knowing the victim's password), but is now a
+  real, live gap — milestone 3 added authenticated, state-changing endpoints (create/update/delete
+  a vendor or proposal) that a malicious page could trigger cross-site for a logged-in user. This
+  is the next hardening item that should land before this app handles anything beyond portfolio
+  demo data.
 - Passwords are capped at 72 bytes at the schema layer (`PASSWORD_MAX_LENGTH`) because `bcrypt`
   itself rejects longer input; validating in Pydantic turns that into a clean `422` instead of a
   raw exception.
+
+### Domain model: vendors and proposals
+
+`Vendor` belongs to a `User` (`owner_id`); `Proposal` belongs to a `Vendor`. All vendor/proposal
+endpoints are ownership-scoped — `get_owned_vendor` / `get_owned_proposal` (`app/api/deps.py`) look
+up the row *and* verify `owner_id` in one query, returning `404` (not `403`) when it doesn't
+belong to the current user, so a request can't distinguish "doesn't exist" from "exists but isn't
+yours." Deleting a vendor cascades to its proposals, both at the ORM level
+(`cascade="all, delete-orphan"`) and the database level (`ondelete="CASCADE"` on the FK), so it
+holds even for direct SQL that bypasses the ORM.
+
+`GET /api/v1/proposals` (all of the current user's proposals, across every vendor) exists
+alongside the vendor-scoped `GET /api/v1/vendors/{id}/proposals` specifically for the comparison
+UI — comparing proposals is a cross-vendor operation (that's the point: comparing *different*
+vendors' bids for the same need), not a within-one-vendor operation, so the frontend needed a
+flat list rather than fetching per-vendor and merging client-side.
 
 ### AI provider abstraction
 
 `app/services/ai/` defines an `AIProvider` interface and one concrete implementation,
 `OpenAICompatibleProvider`, which calls any `/chat/completions`-compatible endpoint (OpenAI, Azure
-OpenAI, or a self-hosted gateway) over HTTP via `httpx`. It is fully real — no mocked or
-hard-coded responses — but **no route calls it yet**. Milestone 1 only establishes the
-abstraction so future vendor-sourcing/proposal-comparison features are built against an interface,
-not a specific vendor SDK. It's covered by a test that exercises a real HTTP request/response
-cycle through `httpx.MockTransport`, confirming the integration code path itself is correct.
+OpenAI, Groq, or a self-hosted gateway) over HTTP via `httpx`. It is fully real — no mocked or
+hard-coded responses. As of milestone 3 it's wired up: `POST /api/v1/proposals/compare` takes 2-10
+proposal IDs (any of the current user's, across vendors), formats each into a short block (vendor
+name, price, submission date, summary text), and asks the provider to compare them.
+
+**Graceful degradation, not a fake response:** if `AI_PROVIDER_API_KEY` isn't set,
+`get_ai_provider()` raises `ValueError` (from `OpenAICompatibleProvider.__init__`), which the
+route catches and turns into `503 Service Unavailable` with a clear message — never a fabricated
+comparison. If the provider *is* configured but the HTTP call itself fails, that's a `502`
+instead. The frontend's `ProposalComparison` component just renders whatever `ApiError.message`
+came back, so both cases show up as a normal, readable error state rather than a broken UI. This
+was a deliberate requirement from the start of the project ("no fake AI behavior disguised as a
+real integration") and is covered by tests for the configured, unconfigured, and
+provider-failure cases (`tests/test_comparison.py`, mocking `get_ai_provider` — no real API key
+is used or required in tests).
 
 ## Local development
 
@@ -120,6 +159,24 @@ cycle through `httpx.MockTransport`, confirming the integration code path itself
 `apps/api/Dockerfile.prod` for the backend, the OpenNext Cloudflare adapter for the frontend — see
 [deployment.md](deployment.md).
 
+### Docker Compose: two different API URLs
+
+`apps/web`'s `env.ts` exports both `apiUrl` (`NEXT_PUBLIC_API_URL`) and `internalApiUrl`
+(`INTERNAL_API_URL`, falling back to `NEXT_PUBLIC_API_URL`). They're the same value everywhere
+*except* Docker Compose, and getting this wrong is a real bug that shipped and was only caught by
+testing through the actual containers rather than trusting `next dev` locally:
+
+- The **browser** runs on the host machine, outside Compose's network — it needs
+  `http://localhost:8000` (the published port).
+- The **Next.js server itself** runs *inside* the `web` container. There, `localhost` means the
+  `web` container, not the `api` one — nothing is listening on port 8000 there. It needs the
+  Compose service DNS name instead: `http://api:8000`.
+
+`apiClient` (browser-only) uses `apiUrl`; `server-api.ts` (Server Components) uses
+`internalApiUrl`. `docker-compose.yml` sets both explicitly for the `web` service. Outside Compose
+(local `next dev`, or production where Cloudflare and Render are genuinely separate public hosts
+with no "internal" address), only `NEXT_PUBLIC_API_URL` is set and both resolve to the same URL.
+
 ## Testing notes
 
 - Backend tests never run against the database configured in `DATABASE_URL` directly —
@@ -128,14 +185,23 @@ cycle through `httpx.MockTransport`, confirming the integration code path itself
   was configured, which silently wiped a local dev/e2e database that happened to share the same
   Postgres instance. Always test against an isolated database, never the one a developer might
   also be poking at manually.
-- The Playwright auth e2e spec (`apps/web/e2e/auth.spec.ts`) hits a real running backend + Postgres
-  — it isn't mocked. Running it locally means the backend and `db` need to actually be up first
-  (see the README's testing section).
+- The Playwright e2e specs (`apps/web/e2e/auth.spec.ts`, `vendors.spec.ts`) hit a real running
+  backend + Postgres — they aren't mocked. Running them locally means the backend and `db` need
+  to actually be up first (see the README's testing section). `vendors.spec.ts`'s comparison step
+  runs with no `AI_PROVIDER_API_KEY` configured, so it verifies the graceful-503 path, not a live
+  AI call — that's the actual state of the test/CI environment, not a simplification for the test.
+- **Server-rendered pages need to be verified through Docker Compose specifically**, not just
+  `next dev` — see the internal-vs-public API URL gotcha above, which only manifests once the
+  Next.js server itself is running inside a container.
 
 ## Deliberate scope boundaries
 
-- No vendor/proposal domain models yet — milestones 1-2 are the platform foundation, deployment,
-  and an authenticated shell. No sourcing/comparison/partner-management features exist.
-- No refresh-token revocation/rotation storage, no CSRF token, no silent token refresh (all above).
-- The AI provider abstraction is unused by any endpoint.
-- `/dashboard` is a placeholder — it shows the signed-in user's email and nothing else.
+- No refresh-token revocation/rotation storage, no CSRF token (now a live gap, not just
+  theoretical — see above), no silent token refresh.
+- Vendors and proposals are simple CRUD with no file/document attachments, no organizations or
+  team sharing (a vendor belongs to exactly one user, not a company account), and no proposal
+  status/pipeline (submitted, accepted, rejected, etc.) — just a flat list.
+- The AI comparison prompt is a fixed template; there's no way to ask a follow-up question or
+  steer what the comparison focuses on.
+- No pagination anywhere (vendor list, proposal list, comparison candidates) — fine at demo scale,
+  would need addressing before real usage.

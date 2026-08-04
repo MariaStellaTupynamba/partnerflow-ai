@@ -10,7 +10,8 @@ test("a user can register, land on the dashboard, and log out", async ({ page })
   await page.getByRole("button", { name: "Create account" }).click();
 
   await expect(page).toHaveURL(/\/dashboard$/);
-  await expect(page.getByText(`Signed in as ${email}`)).toBeVisible();
+  await expect(page.getByText(email)).toBeVisible();
+  await expect(page.getByText("No vendors yet.")).toBeVisible();
 
   await page.getByRole("button", { name: "Log out" }).click();
   await expect(page).toHaveURL(/\/login$/);

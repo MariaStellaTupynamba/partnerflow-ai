@@ -36,3 +36,56 @@ export interface LoginRequest {
 export interface ApiErrorResponse {
   detail: string;
 }
+
+export interface Vendor {
+  id: string;
+  name: string;
+  website: string | null;
+  contactName: string | null;
+  contactEmail: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VendorCreate {
+  name: string;
+  website?: string | null;
+  contactName?: string | null;
+  contactEmail?: string | null;
+  notes?: string | null;
+}
+
+export type VendorUpdate = Partial<VendorCreate>;
+
+export interface Proposal {
+  id: string;
+  vendorId: string;
+  title: string;
+  // Decimal fields serialize as strings on the wire (e.g. "1200.00") to avoid floating-point
+  // rounding — parse with Number(...) only where arithmetic is actually needed for display.
+  price: string | null;
+  currency: string;
+  summary: string;
+  submittedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProposalCreate {
+  title: string;
+  price?: string | number | null;
+  currency?: string;
+  summary: string;
+  submittedAt?: string | null;
+}
+
+export type ProposalUpdate = Partial<ProposalCreate>;
+
+export interface ComparisonRequest {
+  proposalIds: string[];
+}
+
+export interface ComparisonResponse {
+  summary: string;
+}

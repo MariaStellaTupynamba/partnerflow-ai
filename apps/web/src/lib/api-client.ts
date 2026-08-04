@@ -1,8 +1,16 @@
 import type {
+  ComparisonRequest,
+  ComparisonResponse,
   HealthCheckResponse,
   LoginRequest,
+  Proposal,
+  ProposalCreate,
+  ProposalUpdate,
   RegisterRequest,
   UserPublic,
+  Vendor,
+  VendorCreate,
+  VendorUpdate,
 } from "@partnerflow/shared-types";
 
 import { env } from "@/lib/env";
@@ -58,4 +66,38 @@ export const apiClient = {
     }),
   logout: () => request<void>("/api/v1/auth/logout", { method: "POST" }),
   me: () => request<UserPublic>("/api/v1/auth/me"),
+
+  listVendors: () => request<Vendor[]>("/api/v1/vendors"),
+  getVendor: (vendorId: string) => request<Vendor>(`/api/v1/vendors/${vendorId}`),
+  createVendor: (payload: VendorCreate) =>
+    request<Vendor>("/api/v1/vendors", { method: "POST", body: JSON.stringify(payload) }),
+  updateVendor: (vendorId: string, payload: VendorUpdate) =>
+    request<Vendor>(`/api/v1/vendors/${vendorId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteVendor: (vendorId: string) =>
+    request<void>(`/api/v1/vendors/${vendorId}`, { method: "DELETE" }),
+
+  listProposals: (vendorId: string) =>
+    request<Proposal[]>(`/api/v1/vendors/${vendorId}/proposals`),
+  listAllProposals: () => request<Proposal[]>("/api/v1/proposals"),
+  createProposal: (vendorId: string, payload: ProposalCreate) =>
+    request<Proposal>(`/api/v1/vendors/${vendorId}/proposals`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateProposal: (proposalId: string, payload: ProposalUpdate) =>
+    request<Proposal>(`/api/v1/proposals/${proposalId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteProposal: (proposalId: string) =>
+    request<void>(`/api/v1/proposals/${proposalId}`, { method: "DELETE" }),
+
+  compareProposals: (payload: ComparisonRequest) =>
+    request<ComparisonResponse>("/api/v1/proposals/compare", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 };
