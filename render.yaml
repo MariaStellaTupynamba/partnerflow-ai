@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: partnerflow-api
+    runtime: docker
+    plan: free
+    dockerfilePath: apps/api/Dockerfile.prod
+    dockerContext: apps/api
+    healthCheckPath: /health
+    envVars:
+      # Paste a Neon/Supabase Postgres connection string here (dashboard-only, not committed).
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: ENVIRONMENT
+        value: production
+      # Update to the actual Cloudflare Worker URL once the frontend is deployed.
+      - key: CORS_ALLOW_ORIGINS
+        sync: false

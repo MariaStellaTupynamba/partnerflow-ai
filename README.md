@@ -81,8 +81,8 @@ pytest
 
 ## Deployment
 
-Frontend on Cloudflare Workers (via OpenNext), backend + Postgres on Railway. See
-[docs/deployment.md](docs/deployment.md) for the full runbook.
+Frontend on Cloudflare Workers (via OpenNext), backend on Render, database on Neon — all free
+tiers. See [docs/deployment.md](docs/deployment.md) for the full runbook.
 
 ## Contributing
 
