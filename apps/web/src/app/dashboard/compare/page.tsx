@@ -1,17 +1,33 @@
-import { redirect } from "next/navigation";
+"use client";
+
+import type { Proposal, Vendor } from "@partnerflow/shared-types";
+import { useEffect, useState } from "react";
 
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { ProposalComparison } from "@/components/ProposalComparison";
-import { getAllProposals, getCurrentUser, getVendors } from "@/lib/server-api";
+import { apiClient } from "@/lib/api-client";
+import { useCurrentUser } from "@/lib/user-context";
 
-export default async function ComparePage() {
-  const user = await getCurrentUser();
-  if (!user) {
-    redirect("/login");
-  }
+export default function ComparePage() {
+  const user = useCurrentUser();
+  const [proposals, setProposals] = useState<Proposal[] | null>(null);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
 
-  const [proposals, vendors] = await Promise.all([getAllProposals(), getVendors()]);
-  const vendorNamesById = Object.fromEntries((vendors ?? []).map((v) => [v.id, v.name]));
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([apiClient.listAllProposals(), apiClient.listVendors()]).then(
+      ([proposalsResult, vendorsResult]) => {
+        if (cancelled) return;
+        setProposals(proposalsResult);
+        setVendors(vendorsResult);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const vendorNamesById = Object.fromEntries(vendors.map((v) => [v.id, v.name]));
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-50 dark:bg-black">
@@ -24,7 +40,11 @@ export default async function ComparePage() {
           Select two or more proposals — from any vendor — and get an AI-generated comparison of
           price, scope, and terms.
         </p>
-        <ProposalComparison proposals={proposals ?? []} vendorNamesById={vendorNamesById} />
+        {proposals === null ? (
+          <p className="mt-6 text-sm text-zinc-500 dark:text-zinc-400">Loading…</p>
+        ) : (
+          <ProposalComparison proposals={proposals} vendorNamesById={vendorNamesById} />
+        )}
       </main>
     </div>
   );

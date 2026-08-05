@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db_session, get_owned_proposal, get_owned_vendor
+from app.core.csrf import verify_csrf_token
 from app.models.proposal import Proposal
 from app.models.user import User
 from app.models.vendor import Vendor
@@ -27,6 +28,7 @@ COMPARISON_SYSTEM_PROMPT = (
     "/vendors/{vendor_id}/proposals",
     response_model=ProposalRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(verify_csrf_token)],
 )
 async def create_proposal(
     payload: ProposalCreate,
@@ -80,7 +82,11 @@ def _format_proposal_for_prompt(proposal: Proposal, vendor: Vendor) -> str:
     )
 
 
-@router.post("/proposals/compare", response_model=ComparisonResponse)
+@router.post(
+    "/proposals/compare",
+    response_model=ComparisonResponse,
+    dependencies=[Depends(verify_csrf_token)],
+)
 async def compare_proposals(
     payload: ComparisonRequest,
     current_user: User = Depends(get_current_user),
@@ -132,7 +138,11 @@ async def read_proposal(proposal: Proposal = Depends(get_owned_proposal)) -> Pro
     return proposal
 
 
-@router.patch("/proposals/{proposal_id}", response_model=ProposalRead)
+@router.patch(
+    "/proposals/{proposal_id}",
+    response_model=ProposalRead,
+    dependencies=[Depends(verify_csrf_token)],
+)
 async def update_proposal(
     payload: ProposalUpdate,
     proposal: Proposal = Depends(get_owned_proposal),
@@ -145,7 +155,11 @@ async def update_proposal(
     return proposal
 
 
-@router.delete("/proposals/{proposal_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/proposals/{proposal_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(verify_csrf_token)],
+)
 async def delete_proposal(
     proposal: Proposal = Depends(get_owned_proposal), db: AsyncSession = Depends(get_db_session)
 ) -> None:

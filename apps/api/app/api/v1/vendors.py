@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db_session, get_owned_vendor
+from app.core.csrf import verify_csrf_token
 from app.models.user import User
 from app.models.vendor import Vendor
 from app.schemas.vendor import VendorCreate, VendorRead, VendorUpdate
@@ -10,7 +11,12 @@ from app.schemas.vendor import VendorCreate, VendorRead, VendorUpdate
 router = APIRouter(prefix="/vendors", tags=["vendors"])
 
 
-@router.post("", response_model=VendorRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=VendorRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(verify_csrf_token)],
+)
 async def create_vendor(
     payload: VendorCreate,
     current_user: User = Depends(get_current_user),
@@ -39,7 +45,9 @@ async def read_vendor(vendor: Vendor = Depends(get_owned_vendor)) -> Vendor:
     return vendor
 
 
-@router.patch("/{vendor_id}", response_model=VendorRead)
+@router.patch(
+    "/{vendor_id}", response_model=VendorRead, dependencies=[Depends(verify_csrf_token)]
+)
 async def update_vendor(
     payload: VendorUpdate,
     vendor: Vendor = Depends(get_owned_vendor),
@@ -52,7 +60,11 @@ async def update_vendor(
     return vendor
 
 
-@router.delete("/{vendor_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{vendor_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(verify_csrf_token)],
+)
 async def delete_vendor(
     vendor: Vendor = Depends(get_owned_vendor), db: AsyncSession = Depends(get_db_session)
 ) -> None:

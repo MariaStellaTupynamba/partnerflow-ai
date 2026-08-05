@@ -25,7 +25,24 @@ export class ApiError extends Error {
   }
 }
 
+const CSRF_TOKEN_COOKIE = "csrf_token";
+const CSRF_TOKEN_HEADER = "x-csrf-token";
+
+/**
+ * Reads the (deliberately non-httpOnly) CSRF cookie set alongside the auth cookies on
+ * login/register, and mirrors it back as a header — the "double-submit cookie" pattern. A
+ * cross-site attacker can make the browser attach cookies to a forged request, but can't read
+ * this cookie's value to forge a matching header. See app/core/csrf.py on the backend.
+ */
+function getCsrfToken(): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${CSRF_TOKEN_COOKIE}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const csrfToken = getCsrfToken();
+
   const response = await fetch(`${env.apiUrl}${path}`, {
     ...init,
     // Sends/receives the httpOnly auth cookies. Required since the frontend and backend
@@ -33,6 +50,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      ...(csrfToken ? { [CSRF_TOKEN_HEADER]: csrfToken } : {}),
       ...init?.headers,
     },
   });
@@ -82,6 +100,7 @@ export const apiClient = {
   listProposals: (vendorId: string) =>
     request<Proposal[]>(`/api/v1/vendors/${vendorId}/proposals`),
   listAllProposals: () => request<Proposal[]>("/api/v1/proposals"),
+  getProposal: (proposalId: string) => request<Proposal>(`/api/v1/proposals/${proposalId}`),
   createProposal: (vendorId: string, payload: ProposalCreate) =>
     request<Proposal>(`/api/v1/vendors/${vendorId}/proposals`, {
       method: "POST",

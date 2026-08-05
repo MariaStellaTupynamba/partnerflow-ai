@@ -1,33 +1,63 @@
+"use client";
+
+import type { Proposal, Vendor } from "@partnerflow/shared-types";
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound, useParams } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
 
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { DeleteProposalButton } from "@/components/DeleteProposalButton";
 import { DeleteVendorButton } from "@/components/DeleteVendorButton";
-import { getCurrentUser, getProposalsForVendor, getVendor } from "@/lib/server-api";
+import { ApiError, apiClient } from "@/lib/api-client";
+import { useCurrentUser } from "@/lib/user-context";
 
 function formatPrice(price: string | null, currency: string): string {
   if (price === null) return "Price not specified";
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(Number(price));
 }
 
-export default async function VendorDetailPage({
-  params,
-}: {
-  params: Promise<{ vendorId: string }>;
-}) {
-  const user = await getCurrentUser();
-  if (!user) {
-    redirect("/login");
+export default function VendorDetailPage() {
+  const user = useCurrentUser();
+  const { vendorId } = useParams<{ vendorId: string }>();
+  const [vendor, setVendor] = useState<Vendor | null>(null);
+  const [proposals, setProposals] = useState<Proposal[] | null>(null);
+  const [notFoundError, setNotFoundError] = useState(false);
+
+  const loadProposals = useCallback(() => {
+    apiClient.listProposals(vendorId).then(setProposals);
+  }, [vendorId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .getVendor(vendorId)
+      .then((result) => {
+        if (!cancelled) setVendor(result);
+      })
+      .catch((err) => {
+        if (!cancelled && err instanceof ApiError && err.status === 404) {
+          setNotFoundError(true);
+        }
+      });
+    loadProposals();
+    return () => {
+      cancelled = true;
+    };
+  }, [vendorId, loadProposals]);
+
+  if (notFoundError) {
+    notFound();
   }
 
-  const { vendorId } = await params;
-  const [vendor, proposals] = await Promise.all([
-    getVendor(vendorId),
-    getProposalsForVendor(vendorId),
-  ]);
   if (!vendor) {
-    notFound();
+    return (
+      <div className="flex min-h-screen flex-col bg-zinc-50 dark:bg-black">
+        <DashboardHeader email={user.email} />
+        <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-12">
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">Loading…</p>
+        </main>
+      </div>
+    );
   }
 
   return (
@@ -86,7 +116,9 @@ export default async function VendorDetailPage({
           </Link>
         </div>
 
-        {!proposals || proposals.length === 0 ? (
+        {proposals === null ? (
+          <p className="mt-6 text-sm text-zinc-500 dark:text-zinc-400">Loading…</p>
+        ) : proposals.length === 0 ? (
           <p className="mt-6 text-sm text-zinc-500 dark:text-zinc-400">
             No proposals from this vendor yet.
           </p>
@@ -108,7 +140,7 @@ export default async function VendorDetailPage({
                   >
                     Edit
                   </Link>
-                  <DeleteProposalButton proposalId={proposal.id} />
+                  <DeleteProposalButton proposalId={proposal.id} onDeleted={loadProposals} />
                 </div>
               </li>
             ))}

@@ -1,22 +1,38 @@
-import { notFound, redirect } from "next/navigation";
+"use client";
+
+import type { Vendor } from "@partnerflow/shared-types";
+import { notFound, useParams } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { VendorForm } from "@/components/VendorForm";
-import { getCurrentUser, getVendor } from "@/lib/server-api";
+import { ApiError, apiClient } from "@/lib/api-client";
+import { useCurrentUser } from "@/lib/user-context";
 
-export default async function EditVendorPage({
-  params,
-}: {
-  params: Promise<{ vendorId: string }>;
-}) {
-  const user = await getCurrentUser();
-  if (!user) {
-    redirect("/login");
-  }
+export default function EditVendorPage() {
+  const user = useCurrentUser();
+  const { vendorId } = useParams<{ vendorId: string }>();
+  const [vendor, setVendor] = useState<Vendor | null>(null);
+  const [notFoundError, setNotFoundError] = useState(false);
 
-  const { vendorId } = await params;
-  const vendor = await getVendor(vendorId);
-  if (!vendor) {
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .getVendor(vendorId)
+      .then((result) => {
+        if (!cancelled) setVendor(result);
+      })
+      .catch((err) => {
+        if (!cancelled && err instanceof ApiError && err.status === 404) {
+          setNotFoundError(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [vendorId]);
+
+  if (notFoundError) {
     notFound();
   }
 
@@ -27,7 +43,11 @@ export default async function EditVendorPage({
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
           Edit vendor
         </h1>
-        <VendorForm vendor={vendor} />
+        {vendor ? (
+          <VendorForm vendor={vendor} />
+        ) : (
+          <p className="mt-8 text-sm text-zinc-500 dark:text-zinc-400">Loading…</p>
+        )}
       </main>
     </div>
   );

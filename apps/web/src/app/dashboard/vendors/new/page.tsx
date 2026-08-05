@@ -1,14 +1,11 @@
-import { redirect } from "next/navigation";
+"use client";
 
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { VendorForm } from "@/components/VendorForm";
-import { getCurrentUser } from "@/lib/server-api";
+import { useCurrentUser } from "@/lib/user-context";
 
-export default async function NewVendorPage() {
-  const user = await getCurrentUser();
-  if (!user) {
-    redirect("/login");
-  }
+export default function NewVendorPage() {
+  const user = useCurrentUser();
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-50 dark:bg-black">

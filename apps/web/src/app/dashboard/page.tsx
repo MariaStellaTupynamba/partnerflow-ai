@@ -1,16 +1,26 @@
+"use client";
+
+import type { Vendor } from "@partnerflow/shared-types";
 import Link from "next/link";
-import { redirect } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import { DashboardHeader } from "@/components/DashboardHeader";
-import { getCurrentUser, getVendors } from "@/lib/server-api";
+import { apiClient } from "@/lib/api-client";
+import { useCurrentUser } from "@/lib/user-context";
 
-export default async function DashboardPage() {
-  const user = await getCurrentUser();
-  if (!user) {
-    redirect("/login");
-  }
+export default function DashboardPage() {
+  const user = useCurrentUser();
+  const [vendors, setVendors] = useState<Vendor[] | null>(null);
 
-  const vendors = (await getVendors()) ?? [];
+  useEffect(() => {
+    let cancelled = false;
+    apiClient.listVendors().then((result) => {
+      if (!cancelled) setVendors(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-50 dark:bg-black">
@@ -37,7 +47,9 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        {vendors.length === 0 ? (
+        {vendors === null ? (
+          <p className="mt-8 text-sm text-zinc-500 dark:text-zinc-400">Loading…</p>
+        ) : vendors.length === 0 ? (
           <p className="mt-8 text-sm text-zinc-500 dark:text-zinc-400">
             No vendors yet.{" "}
             <Link href="/dashboard/vendors/new" className="underline">

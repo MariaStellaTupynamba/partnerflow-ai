@@ -1,12 +1,16 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { apiClient } from "@/lib/api-client";
 
-export function DeleteProposalButton({ proposalId }: { proposalId: string }) {
-  const router = useRouter();
+export function DeleteProposalButton({
+  proposalId,
+  onDeleted,
+}: {
+  proposalId: string;
+  onDeleted: () => void;
+}) {
   const [isDeleting, setIsDeleting] = useState(false);
 
   async function handleClick() {
@@ -16,7 +20,7 @@ export function DeleteProposalButton({ proposalId }: { proposalId: string }) {
     setIsDeleting(true);
     try {
       await apiClient.deleteProposal(proposalId);
-      router.refresh();
+      onDeleted();
     } finally {
       setIsDeleting(false);
     }

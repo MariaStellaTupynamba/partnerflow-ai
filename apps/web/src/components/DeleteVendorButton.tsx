@@ -17,7 +17,6 @@ export function DeleteVendorButton({ vendorId }: { vendorId: string }) {
     try {
       await apiClient.deleteVendor(vendorId);
       router.push("/dashboard");
-      router.refresh();
     } finally {
       setIsDeleting(false);
     }

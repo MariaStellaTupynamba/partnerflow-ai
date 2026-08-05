@@ -2,9 +2,10 @@
 
 PartnerFlow AI is an npm-workspaces monorepo with a Next.js frontend and a FastAPI backend,
 sharing a Postgres database. This document covers the platform foundation (milestone 1), the
-authenticated frontend shell (milestone 2), and the first real product features — vendors,
-proposals, and AI-assisted comparison (milestone 3): what exists, what deliberately doesn't yet,
-and why key decisions were made the way they were.
+authenticated frontend shell (milestone 2), the first real product features — vendors, proposals,
+and AI-assisted comparison (milestone 3) — and CSRF protection plus a significant auth-fetching
+bugfix (milestone 4): what exists, what deliberately doesn't yet, and why key decisions were made
+the way they were.
 
 ## Repository layout
 
@@ -31,21 +32,21 @@ docker-compose.yml    Local dev environment: Postgres + API + web
   actually wired together, not just visually scaffolded.
 - **Auth UI:** `/register` and `/login` pages (client components, plain `useState` forms — no
   form library, not needed at this size) call `apiClient.register` / `.login`, then redirect to
-  `/dashboard`. Unauthenticated visits to any `/dashboard/**` route redirect to `/login` before
-  any protected content renders (no flash of content).
-- **`src/lib/server-api.ts`** is the Server Component counterpart to `apiClient` — used by every
-  page under `/dashboard` for the initial server-rendered data (current user, vendors, proposals).
-  It exists *separately* from the browser-only `apiClient` because a server-side fetch has no
-  cookie jar of its own; it reads the incoming request's cookies via `next/headers` and forwards
-  them explicitly. It talks to `env.internalApiUrl`, not `env.apiUrl` — see the Docker Compose
-  gotcha below for why those two are sometimes different URLs.
+  `/dashboard`.
+- **Everything under `/dashboard` is client-rendered and fetches its own data from the browser.**
+  `app/dashboard/layout.tsx` wraps every nested route in `<DashboardAuthGate>`
+  (`src/lib/user-context.tsx`): on mount it calls `apiClient.me()`; while that's pending it shows
+  a loading state, on success it provides the user via React context (`useCurrentUser()`), on
+  failure it redirects to `/login`. Every page's data (vendor list, vendor detail, proposals) is
+  likewise fetched client-side with `apiClient` in a `useEffect`, not server-rendered. This is not
+  the original design — see "The cross-domain cookie bug" below for why server-side data fetching
+  had to be abandoned entirely.
 - **Vendor/proposal UI:** a vendor list (`/dashboard`), vendor detail with its proposals
   (`/dashboard/vendors/[vendorId]`), create/edit forms for both (`VendorForm`/`ProposalForm`,
   shared between their `new` and `edit` pages since the fields are identical either way), and a
   cross-vendor comparison page (`/dashboard/compare`). Delete actions (`DeleteVendorButton`,
-  `DeleteProposalButton`) are small client components — a Server Component can't pass an
-  `onClick` callback down to one (functions aren't serializable across that boundary), so each
-  takes a plain string ID prop and makes its own `apiClient` call.
+  `DeleteProposalButton`) take an `onDeleted` callback prop from their parent page to update
+  local state after a successful delete, rather than a full page reload.
 
 ## Backend (`apps/api`)
 
@@ -84,9 +85,8 @@ JavaScript, so a token can't be exfiltrated by an XSS payload the way a token si
   `settings.environment` rather than hardcoded.
 - `access_token` is scoped `Path=/` (every endpoint may need it); `refresh_token` is scoped
   `Path=/api/v1/auth` (only the refresh/logout endpoints ever need to see it).
-- The frontend's `apiClient` always sends `credentials: "include"`; a **server-side** fetch (used
-  by every `/dashboard` page's auth check) has no browser cookie jar and must forward the incoming
-  request's `Cookie` header explicitly — see `src/lib/server-api.ts`.
+- The frontend's `apiClient` always sends `credentials: "include"` — every API call is made from
+  the browser, never server-side. See "The cross-domain cookie bug" below for why.
 
 Other library/design choices:
 
@@ -104,16 +104,46 @@ Other library/design choices:
   retrying. Implementing that properly needs a place that can *write* cookies on the response
   (a Server Action or Middleware — a plain Server Component render cannot set cookies in Next.js),
   which is meaningful added complexity deferred until it's actually needed.
-- **No CSRF token.** `SameSite=None` cookies (used in production, cross-site) don't provide CSRF
-  protection the way `Lax`/`Strict` do. This was low-risk when only auth endpoints existed
-  (forging a login/register request requires already knowing the victim's password), but is now a
-  real, live gap — milestone 3 added authenticated, state-changing endpoints (create/update/delete
-  a vendor or proposal) that a malicious page could trigger cross-site for a logged-in user. This
-  is the next hardening item that should land before this app handles anything beyond portfolio
-  demo data.
 - Passwords are capped at 72 bytes at the schema layer (`PASSWORD_MAX_LENGTH`) because `bcrypt`
   itself rejects longer input; validating in Pydantic turns that into a clean `422` instead of a
   raw exception.
+
+### CSRF protection (milestone 4)
+
+`SameSite=None` cookies (required in production, since Cloudflare and Render are different
+registrable domains) don't provide CSRF protection the way `Lax`/`Strict` do — a malicious page
+can still make a logged-in user's browser attach their cookies to a forged request. Milestone 3
+made this a real, live gap by adding authenticated, state-changing endpoints (create/update/delete
+a vendor or proposal); milestone 4 closes it with the **double-submit cookie pattern**
+(`app/core/csrf.py`, `app/core/cookies.py`):
+
+- `set_auth_cookies` now also sets a third cookie, `csrf_token` — a random value, but
+  deliberately **not httpOnly**, since the frontend needs to read it with JavaScript.
+- The frontend (`api-client.ts`) reads that cookie and mirrors its value back as an
+  `X-CSRF-Token` header on every request.
+- `verify_csrf_token` (applied via `dependencies=[Depends(...)]` on every mutating vendor/
+  proposal/compare route) rejects the request with `403` unless the header matches the cookie,
+  using `secrets.compare_digest` for the comparison.
+
+Why this actually stops the attack: a cross-site attacker's page can trigger a request that
+carries the victim's cookies (that's unavoidable with `SameSite=None`), but it **cannot read**
+the `csrf_token` cookie's value — cross-origin pages can't read another origin's cookies — so it
+has no way to produce a header that matches. Only this frontend's own JavaScript, running on a
+page that can actually read the cookie, can construct a valid request.
+
+`register`/`login`/`refresh`/`logout` are deliberately exempt: register and login are what
+*establish* the CSRF cookie in the first place (requiring one would be circular), and they're
+already protected by requiring the victim's password. Forging a `refresh` or `logout` call only
+affects the victim's own session state (new tokens they still control, or being logged out) — low
+enough impact that adding the check wasn't worth the complexity, unlike vendor/proposal mutations
+and the AI comparison call, which have a real cost (data changes, or triggering billed API calls)
+if forged repeatedly.
+
+One implementation subtlety: `verify_csrf_token` takes `current_user: User = Depends(get_current_user)`
+as an otherwise-unused parameter, purely to force FastAPI to resolve authentication *before* the
+CSRF check. Without it, an anonymous request (no cookies at all) could fail the CSRF check first
+and return a confusing `403`, instead of the correct `401` for "you're not logged in." This was
+caught by a test (`test_unauthenticated_request_fails_auth_before_csrf`), not by inspection.
 
 ### Domain model: vendors and proposals
 
@@ -159,23 +189,49 @@ is used or required in tests).
 `apps/api/Dockerfile.prod` for the backend, the OpenNext Cloudflare adapter for the frontend — see
 [deployment.md](deployment.md).
 
-### Docker Compose: two different API URLs
+### The cross-domain cookie bug (milestone 4)
 
-`apps/web`'s `env.ts` exports both `apiUrl` (`NEXT_PUBLIC_API_URL`) and `internalApiUrl`
-(`INTERNAL_API_URL`, falling back to `NEXT_PUBLIC_API_URL`). They're the same value everywhere
-*except* Docker Compose, and getting this wrong is a real bug that shipped and was only caught by
-testing through the actual containers rather than trusting `next dev` locally:
+Milestone 2 built `/dashboard`'s auth check as a **server-side** fetch: read the incoming
+request's cookies via `next/headers`, forward them to the backend's `/api/v1/auth/me`. This shipped,
+passed every test, and was live for two milestones — and it never actually worked for a real user
+on the deployed site. Logging in would succeed, then `/dashboard` would silently bounce back to
+`/login`, with no error.
 
-- The **browser** runs on the host machine, outside Compose's network — it needs
-  `http://localhost:8000` (the published port).
-- The **Next.js server itself** runs *inside* the `web` container. There, `localhost` means the
-  `web` container, not the `api` one — nothing is listening on port 8000 there. It needs the
-  Compose service DNS name instead: `http://api:8000`.
+**Root cause:** cookies are scoped to the domain that set them. The backend
+(`partnerflow-api.onrender.com`) sets `Set-Cookie` on login/register; the browser stores those
+cookies under *that* domain only. The frontend (`partnerflow-ai.solutionstechmedia.workers.dev`)
+is a different domain — when its server renders `/dashboard`, the incoming browser request never
+carries the backend's cookies in the first place, because the browser was never talking to the
+backend's domain for that request. There was nothing to forward. A server-side fetch architecture
+like this only works when frontend and backend share a domain (or the frontend proxies API calls
+through its own domain) — cross-domain, it's structurally broken, not a config bug.
 
-`apiClient` (browser-only) uses `apiUrl`; `server-api.ts` (Server Components) uses
-`internalApiUrl`. `docker-compose.yml` sets both explicitly for the `web` service. Outside Compose
-(local `next dev`, or production where Cloudflare and Render are genuinely separate public hosts
-with no "internal" address), only `NEXT_PUBLIC_API_URL` is set and both resolve to the same URL.
+**Why nothing caught it:** every environment this was tested in accidentally put frontend and
+backend on the same *site* (same registrable domain — the part that matters for cookies, not the
+port):
+
+- Local `next dev`: both on `localhost`, different ports only.
+- Docker Compose: both reachable at `localhost` from the browser's perspective (published ports).
+- Playwright e2e (local and CI): both `localhost`.
+- Manual "live" verification after deploying: done with `curl -b <cookie-jar>`, manually attaching
+  the backend's cookies to a request aimed at the frontend's URL — something a real browser would
+  never do, since it strictly partitions cookies per domain. This tested nothing real.
+
+**The fix:** stop doing server-side data fetching against the backend at all.
+`src/lib/server-api.ts` is gone. Every `/dashboard` page fetches its own data client-side with
+`apiClient`, which makes real browser `fetch` calls with `credentials: "include"` — the same
+mechanism `/login` and `/register` always used successfully, since those were always client
+components. `app/dashboard/layout.tsx` + `src/lib/user-context.tsx`'s `<DashboardAuthGate>`
+centralizes the auth check: on mount, call `apiClient.me()`; redirect to `/login` on failure;
+otherwise provide the user via context to the whole subtree. The trade-off is a brief client-side
+loading state instead of an instant server-rendered page — an acceptable cost for something that
+actually works.
+
+**The lesson driving how this gets verified now:** don't trust any test where frontend and
+backend happen to share a domain, and don't trust `curl` with a manually-assembled cookie header
+to stand in for real browser behavior — cross-domain auth needs to be checked against the actual
+deployed domains, with a real browser (or at minimum, without hand-feeding it cookies it wouldn't
+otherwise have).
 
 ## Testing notes
 
@@ -190,14 +246,15 @@ with no "internal" address), only `NEXT_PUBLIC_API_URL` is set and both resolve 
   to actually be up first (see the README's testing section). `vendors.spec.ts`'s comparison step
   runs with no `AI_PROVIDER_API_KEY` configured, so it verifies the graceful-503 path, not a live
   AI call — that's the actual state of the test/CI environment, not a simplification for the test.
-- **Server-rendered pages need to be verified through Docker Compose specifically**, not just
-  `next dev` — see the internal-vs-public API URL gotcha above, which only manifests once the
-  Next.js server itself is running inside a container.
+- **Local/CI e2e testing cannot catch cross-domain cookie bugs** — see "The cross-domain cookie
+  bug" above. Frontend and backend are always same-site in every automated test environment here.
+  Anything involving cross-domain cookie behavior needs to be checked against the real deployed
+  domains with an actual browser before it's trusted.
 
 ## Deliberate scope boundaries
 
-- No refresh-token revocation/rotation storage, no CSRF token (now a live gap, not just
-  theoretical — see above), no silent token refresh.
+- No refresh-token revocation/rotation storage, no silent token refresh (both above). CSRF
+  protection is now in place (milestone 4).
 - Vendors and proposals are simple CRUD with no file/document attachments, no organizations or
   team sharing (a vendor belongs to exactly one user, not a company account), and no proposal
   status/pipeline (submitted, accepted, rejected, etc.) — just a flat list.

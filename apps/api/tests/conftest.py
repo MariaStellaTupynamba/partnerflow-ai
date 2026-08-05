@@ -2,12 +2,14 @@ from collections.abc import AsyncGenerator
 from urllib.parse import urlsplit, urlunsplit
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient, Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.api.deps import get_db_session
 from app.core.config import get_settings
+from app.core.cookies import CSRF_TOKEN_COOKIE
+from app.core.csrf import CSRF_TOKEN_HEADER
 from app.db.base import Base
 from app.main import app
 
@@ -69,12 +71,43 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
             await transaction.rollback()
 
 
-@pytest.fixture
-async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
-    async def _override_get_db_session() -> AsyncGenerator[AsyncSession, None]:
+def _override_db_session(db_session: AsyncSession) -> None:
+    async def _get_db_session() -> AsyncGenerator[AsyncSession, None]:
         yield db_session
 
-    app.dependency_overrides[get_db_session] = _override_get_db_session
+    app.dependency_overrides[get_db_session] = _get_db_session
+
+
+async def _mirror_csrf_cookie_as_header(request: Request) -> None:
+    """Mimics what the real frontend does: read the (non-httpOnly) CSRF cookie and send it
+    back as a header. httpx merges the client's cookie jar into `request.headers["cookie"]`
+    before request hooks run, so this cookie value is already present to read here."""
+    for part in request.headers.get("cookie", "").split("; "):
+        if part.startswith(f"{CSRF_TOKEN_COOKIE}="):
+            request.headers[CSRF_TOKEN_HEADER] = part.split("=", 1)[1]
+            return
+
+
+@pytest.fixture
+async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
+    """The default client for tests — automatically mirrors the CSRF cookie as a header on
+    every request, so tests that aren't specifically about CSRF don't need to think about it."""
+    _override_db_session(db_session)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        event_hooks={"request": [_mirror_csrf_cookie_as_header]},
+    ) as async_client:
+        yield async_client
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def raw_client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
+    """Like `client`, but without the CSRF auto-mirroring — for tests that need precise
+    control over the X-CSRF-Token header (missing, wrong, or deliberately correct)."""
+    _override_db_session(db_session)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as async_client:
         yield async_client
